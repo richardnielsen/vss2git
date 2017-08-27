@@ -29,167 +29,67 @@ namespace Hpdi.Vss2Git
     public partial class MainForm : Form
     {
         private readonly Dictionary<int, EncodingInfo> codePages = new Dictionary<int, EncodingInfo>();
-        private readonly WorkQueue workQueue = new WorkQueue(1);
-        private Logger logger = Logger.Null;
-        private RevisionAnalyzer revisionAnalyzer;
-        private ChangesetBuilder changesetBuilder;
+        Processor Proc = Program.MainProc;
 
-        public MainForm()
+        public MainForm ()
         {
             InitializeComponent();
         }
 
-        private void OpenLog(string filename)
-        {
-            logger = string.IsNullOrEmpty(filename) ? Logger.Null : new Logger(filename);
-        }
-
-        private void goButton_Click(object sender, EventArgs e)
+        private void goButton_Click ( object sender, EventArgs e )
         {
             try
             {
-                OpenLog(logTextBox.Text);
-
-                logger.WriteLine("VSS2Git version {0}", Assembly.GetExecutingAssembly().GetName().Version);
-
-                WriteSettings();
-
-                Encoding encoding = Encoding.Default;
-                EncodingInfo encodingInfo;
-                if (codePages.TryGetValue(encodingComboBox.SelectedIndex, out encodingInfo))
-                {
-                    encoding = encodingInfo.GetEncoding();
-                }
-
-                logger.WriteLine("VSS encoding: {0} (CP: {1}, IANA: {2})",
-                    encoding.EncodingName, encoding.CodePage, encoding.WebName);
-                logger.WriteLine("Comment transcoding: {0}",
-                    transcodeCheckBox.Checked ? "enabled" : "disabled");
-                logger.WriteLine("Ignore errors: {0}",
-                    ignoreErrorsCheckBox.Checked ? "enabled" : "disabled");
-
-                var df = new VssDatabaseFactory(vssDirTextBox.Text);
-                df.Encoding = encoding;
-                var db = df.Open();
-
-                var path = vssProjectTextBox.Text;
-                VssItem item;
-                try
-                {
-                    item = db.GetItem(path);
-                }
-                catch (VssPathException ex)
-                {
-                    MessageBox.Show(ex.Message, "Invalid project path",
-                        MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-
-                var project = item as VssProject;
-                if (project == null)
-                {
-                    MessageBox.Show(path + " is not a project", "Invalid project path",
-                        MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-
-                revisionAnalyzer = new RevisionAnalyzer(workQueue, logger, db);
-                if (!string.IsNullOrEmpty(excludeTextBox.Text))
-                {
-                    revisionAnalyzer.ExcludeFiles = excludeTextBox.Text;
-                }
-                revisionAnalyzer.AddItem(project);
-
-                changesetBuilder = new ChangesetBuilder(workQueue, logger, revisionAnalyzer);
-                changesetBuilder.AnyCommentThreshold = TimeSpan.FromSeconds((double)anyCommentUpDown.Value);
-                changesetBuilder.SameCommentThreshold = TimeSpan.FromSeconds((double)sameCommentUpDown.Value);
-                changesetBuilder.BuildChangesets();
-
-                if (!string.IsNullOrEmpty(outDirTextBox.Text))
-                {
-                    var gitExporter = new GitExporter(workQueue, logger,
-                        revisionAnalyzer, changesetBuilder);
-                    if (!string.IsNullOrEmpty(domainTextBox.Text))
-                    {
-                        gitExporter.EmailDomain = domainTextBox.Text;
-                    }
-                    if (!string.IsNullOrEmpty(commentTextBox.Text))
-                    {
-                        gitExporter.DefaultComment = commentTextBox.Text;
-                    }
-                    if (!transcodeCheckBox.Checked)
-                    {
-                        gitExporter.CommitEncoding = encoding;
-                    }
-                    gitExporter.IgnoreErrors = ignoreErrorsCheckBox.Checked;
-                    gitExporter.ExportToGit(outDirTextBox.Text);
-                }
-
-                workQueue.Idle += delegate
-                {
-                    logger.Dispose();
-                    logger = Logger.Null;
-                };
-
-                statusTimer.Enabled = true;
+                WriteSettings ();
+                UnloadUI ();
+                Proc.UsingUI = true;
+                Proc.Process ();
                 goButton.Enabled = false;
+                cancelButton.Enabled = true;
+                statusTimer.Enabled = true;
             }
-            catch (Exception ex)
+            catch ( Exception Ex )
             {
-                logger.Dispose();
-                logger = Logger.Null;
-                ShowException(ex);
+                MessageBox.Show ( ExceptionFormatter.Format ( Ex ), "Unexpected Error", MessageBoxButtons.OK, MessageBoxIcon.Error );
             }
         }
 
-        private void cancelButton_Click(object sender, EventArgs e)
+        private void cancelButton_Click ( object sender, EventArgs e )
         {
-            workQueue.Abort();
+            if ( Proc.Queue != null )
+            {
+                Proc.Queue.Abort ();
+            }
         }
 
         private void statusTimer_Tick(object sender, EventArgs e)
         {
-            statusLabel.Text = workQueue.LastStatus ?? "Idle";
-            timeLabel.Text = string.Format("Elapsed: {0:HH:mm:ss}",
-                new DateTime(workQueue.ActiveTime.Ticks));
+            statusLabel.Text = Proc.Queue.LastStatus ?? "Idle";
+            timeLabel.Text = string.Format("Elapsed: {0:g}", Proc.Queue.ActiveTime);
 
-            if (revisionAnalyzer != null)
+            if ( Proc.Analyzer != null)
             {
-                fileLabel.Text = "Files: " + revisionAnalyzer.FileCount;
-                revisionLabel.Text = "Revisions: " + revisionAnalyzer.RevisionCount;
+                fileLabel.Text = "Files: " + Proc.Analyzer.FileCount;
+                revisionLabel.Text = "Revisions: " + Proc.Analyzer.RevisionCount;
             }
 
-            if (changesetBuilder != null)
+            if ( Proc.Builder != null)
             {
-                changeLabel.Text = "Changesets: " + changesetBuilder.Changesets.Count;
+                changeLabel.Text = "Changesets: " + Proc.Builder.Changesets.Count;
             }
 
-            if (workQueue.IsIdle)
+            if ( Proc.Queue.IsIdle)
             {
-                revisionAnalyzer = null;
-                changesetBuilder = null;
-
                 statusTimer.Enabled = false;
                 goButton.Enabled = true;
+                cancelButton.Enabled = false;
             }
 
-            var exceptions = workQueue.FetchExceptions();
-            if (exceptions != null)
-            {
-                foreach (var exception in exceptions)
-                {
-                    ShowException(exception);
-                }
-            }
         }
 
         private void ShowException(Exception exception)
         {
-            var message = ExceptionFormatter.Format(exception);
-            logger.WriteLine("ERROR: {0}", message);
-            logger.WriteLine(exception);
-
-            MessageBox.Show(message, "Unhandled Exception",
+            MessageBox.Show(ExceptionFormatter.Format(exception), "Unhandled Exception",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
 
@@ -215,15 +115,26 @@ namespace Hpdi.Vss2Git
                 }
             }
 
-            ReadSettings();
+            // setup u/i based on command line parameters or last execution values
+            if ( Program.CmdLine.Parameters.Count > 0 )
+            {
+                LoadUI ();
+            }
+            else
+            {
+                ReadSettings ();
+            }
+
         }
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
         {
             WriteSettings();
-
-            workQueue.Abort();
-            workQueue.WaitIdle();
+            if ( Proc.Queue != null )
+            {
+                Proc.Queue.Abort ();
+                Proc.Queue.WaitIdle ();
+            }
         }
 
         private void ReadSettings()
@@ -257,5 +168,48 @@ namespace Hpdi.Vss2Git
             settings.SameCommentSeconds = (int)sameCommentUpDown.Value;
             settings.Save();
         }
+
+        /// <summary>Save the u/i parameters to our underlying processing parameters</summary>
+        private void UnloadUI ()
+        {
+            Proc.Parameters.VssDirectory = vssDirTextBox.Text;
+            Proc.Parameters.VssProject = vssProjectTextBox.Text;
+            Proc.Parameters.VssExcludePaths = excludeTextBox.Text;
+            Proc.Parameters.GitDirectory = outDirTextBox.Text;
+            Proc.Parameters.EmailDomain = domainTextBox.Text;
+            Proc.Parameters.LogFile = logTextBox.Text;
+            Proc.Parameters.DefaultComment = commentTextBox.Text;
+            Proc.Parameters.TranscodeCommentsUtf8 = transcodeCheckBox.Checked;
+            Proc.Parameters.ForceAnnotatedTags = forceAnnotatedCheckBox.Checked;
+            Proc.Parameters.IgnoreGitErrors = ignoreErrorsCheckBox.Checked;
+            Proc.Parameters.AnyCommentSeconds = (double) anyCommentUpDown.Value;
+            Proc.Parameters.SameCommentSeconds = (double) sameCommentUpDown.Value;
+
+            Proc.Parameters.DataEncoding = Encoding.Default;
+            EncodingInfo encodingInfo;
+            if ( codePages.TryGetValue ( encodingComboBox.SelectedIndex, out encodingInfo ) )
+            {
+                Proc.Parameters.DataEncoding = encodingInfo.GetEncoding ();
+            }
+        }
+
+        /// <summary>Load the u/i parameters from our underlying processing parameters</summary>
+        private void LoadUI ()
+        {
+            vssDirTextBox.Text = Proc.Parameters.VssDirectory;
+            vssProjectTextBox.Text = Proc.Parameters.VssProject;
+            excludeTextBox.Text = Proc.Parameters.VssExcludePaths;
+            outDirTextBox.Text = Proc.Parameters.GitDirectory;
+            domainTextBox.Text = Proc.Parameters.EmailDomain;
+            logTextBox.Text = Proc.Parameters.LogFile;
+            commentTextBox.Text = Proc.Parameters.DefaultComment;
+            transcodeCheckBox.Checked = Proc.Parameters.TranscodeCommentsUtf8;
+            forceAnnotatedCheckBox.Checked = Proc.Parameters.ForceAnnotatedTags;
+            ignoreErrorsCheckBox.Checked = Proc.Parameters.IgnoreGitErrors;
+            anyCommentUpDown.Value = (decimal) Proc.Parameters.AnyCommentSeconds;
+            sameCommentUpDown.Value = (decimal) Proc.Parameters.SameCommentSeconds;
+        }
+
     }
+
 }

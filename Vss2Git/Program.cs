@@ -24,12 +24,50 @@ namespace Hpdi.Vss2Git
     /// <author>Trevor Robinson</author>
     static class Program
     {
+
+        /// <summary>Get the parsed parameters passed via the command line</summary>
+        public static CommandLineParser CmdLine = new CommandLineParser ();
+
+        /// <summary>Main processor which has its parameters loaded from the command line</summary>
+        public static Processor MainProc = new Processor ();
+
         [STAThread]
-        static void Main()
+        static void Main ( string[] Args )
         {
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new MainForm());
+
+            // parse command line parameters and setup the main processor
+            try
+            {
+                CmdLine.Parse ( Args );
+                MainProc.Parameters.Load ( CmdLine );
+            }
+            catch ( Exception Ex )
+            {
+                MessageBox.Show ( Ex.Message, "Command Line Error", MessageBoxButtons.OK, MessageBoxIcon.Error );
+                return;
+            }
+
+            // show command line usage if requested
+            if ( CmdLine.HelpRequested )
+            {
+                MessageBox.Show ( MainProc.Parameters.GenerateHelpMsg (), "Command Line Usage", MessageBoxButtons.OK, MessageBoxIcon.Information );
+                return;
+            }
+
+            // determine if we should auto-execute or show u/i
+            if ( MainProc.Parameters.AutoExecute )
+            {
+                MainProc.Process ();
+            }
+            else
+            {
+                Application.EnableVisualStyles ();
+                Application.SetCompatibleTextRenderingDefault ( false );
+                MainForm ui = new MainForm ();
+                Application.Run ( ui );
+            }
+
         }
+
     }
 }

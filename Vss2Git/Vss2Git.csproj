@@ -66,10 +66,14 @@
     <Compile Include="AsyncLineReader.cs" />
     <Compile Include="CollectionUtil.cs" />
     <Compile Include="ChangesetBuilder.cs" />
+    <Compile Include="CommandLineParameter.cs" />
+    <Compile Include="CommandLineParser.cs" />
     <Compile Include="ProcessException.cs" />
     <Compile Include="ExceptionFormatter.cs">
     </Compile>
     <Compile Include="PathMatcher.cs" />
+    <Compile Include="Processor.cs" />
+    <Compile Include="ProcessParameters.cs" />
     <Compile Include="Properties\Resources.Designer.cs">
       <AutoGen>True</AutoGen>
       <DesignTime>True</DesignTime>
